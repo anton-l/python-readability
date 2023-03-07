@@ -34,9 +34,9 @@ def normalize_spaces(s):
 
 html_cleaner = Cleaner(
     scripts=True,
-    javascript=True,
+    javascript=False,
     comments=True,
-    style=True,
+    style=False,
     links=True,
     meta=False,
     add_nofollow=False,
