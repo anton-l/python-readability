@@ -194,7 +194,7 @@ class Document:
         Pre-parsing check to see if the document contains enough text.
         Mostly a translation of https://github.com/mozilla/readability/blob/main/Readability-readerable.js
         """
-        nodes = self.html.cssselect("p, pre, article, div:has(> br)")
+        nodes = self.input.cssselect("p, pre, article, div:has(> br)")
         score = 0
         for node in nodes:
             attrs = node.attrib.get("class", "") + node.attrib.get("id", "")
@@ -223,9 +223,11 @@ class Document:
         so it is better to call other API methods before this one.
         """
         try:
-            self._html(True)
+            self.input, self.encoding = build_doc(self.input)
             if not self.is_readable():
                 return ""
+
+            self._html(True)
 
             for i in self.tags(self.html, "script", "style"):
                 i.drop_tree()
