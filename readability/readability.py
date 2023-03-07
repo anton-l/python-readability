@@ -34,7 +34,7 @@ REGEXES = {
         re.I,
     ),
     "negativeRe": re.compile(
-        r"combx|comment|com-|contact|foot|footer|footnote|masthead|media|meta|outbrain|promo|related|scroll|shoutbox|sidebar|sponsor|shopping|tags|tool|widget",
+        r"button|combx|comment|com-|contact|figure|foot|footer|footnote|form|input|masthead|media|meta|outbrain|promo|related|scroll|shoutbox|sidebar|sponsor|shopping|tags|tool|widget",
         re.I,
     ),
     "divToPElementsRe": re.compile(
@@ -49,28 +49,25 @@ REGEXES = {
     # skipFootnoteLink:      /^\s*(\[?[a-z0-9]{1,2}\]?|^|edit|citation needed)\s*$/i,
 }
 
+# fmt: off
+boilerplate_tags = {
+    "address", "amp-auto-ads", "audio", "button", "figcaption", "figure", "footer", "form",
+    "header", "iframe", "img", "input", "map", "nav", "object", "output", "picture", "pirate",
+    "script", "select", "source", "style", "table", "td", "th", "tr", "textarea", "tfoot", "video",
+}
+boilerplate_css = {
+    "ads-middle", "adsbygoogle", "cb_p6_patreon_button", "ezoic-ad", "ezoic-ad-adaptive",
+    "ezoic-adpicker-ad", "inline-ad-slot", "jp-relatedposts", "sharedaddy",
+}
+# fmt: on
+
 
 class Unparseable(ValueError):
     pass
 
 
-def to_int(x):
-    if not x:
-        return None
-    x = x.strip()
-    if x.endswith("px"):
-        return int(x[:-2])
-    if x.endswith("em"):
-        return int(x[:-2]) * 12
-    return int(x)
-
-
 def clean(text):
-    # Many spaces make the following regexes run forever
-    text = re.sub(r"\s{255,}", " " * 255, text)
-    text = re.sub(r"\s*\n\s*", "\n", text)
-    text = re.sub(r"\t|[ \t]{2,}", " ", text)
-    return text.strip()
+    return " ".join(text.split())
 
 
 def text_length(i):
@@ -163,26 +160,6 @@ class Document:
         else:
             doc, self.encoding = build_doc(input)
         doc = html_cleaner.clean_html(doc)
-        base_href = self.url
-        if base_href:
-            # trying to guard against bad links like <a href="http://[http://...">
-            try:
-                # such support is added in lxml 3.3.0
-                doc.make_links_absolute(
-                    base_href,
-                    resolve_base_href=True,
-                    handle_failures=self.handle_failures,
-                )
-            except TypeError:  # make_links_absolute() got an unexpected keyword argument 'handle_failures'
-                # then we have lxml < 3.3.0
-                # please upgrade to lxml >= 3.3.0 if you're failing here!
-                doc.make_links_absolute(
-                    base_href,
-                    resolve_base_href=True,
-                    handle_failures=self.handle_failures,
-                )
-        else:
-            doc.resolve_base_href(handle_failures=self.handle_failures)
         return doc
 
     def content(self):
@@ -203,12 +180,39 @@ class Document:
 
     def get_clean_html(self):
         """
-        An internal method, which can be overridden in subclasses, for example,
-        to disable or to improve DOM-to-text conversion in .summary() method
+        Additional postprocessing to remove any tables, captions and SEO widgets that
+        readability-lxml may have missed.
         """
-        return clean_attributes(tounicode(self.html, method="html"))
+        for el in self.html.iter():
+            if el.tag in boilerplate_tags or not boilerplate_css.isdisjoint(el.classes):
+                el.drop_tree()
 
-    def summary(self, html_partial=False):
+        return tounicode(self.html, method="html")
+
+    def is_readable(self, min_score=20, min_content_len=140) -> bool:
+        """
+        Pre-parsing check to see if the document contains enough text.
+        Mostly a translation of https://github.com/mozilla/readability/blob/main/Readability-readerable.js
+        """
+        nodes = self.html.cssselect("p, pre, article, div:has(> br)")
+        score = 0
+        for node in nodes:
+            attrs = node.attrib.get("class", "") + node.attrib.get("id", "")
+            if REGEXES["unlikelyCandidatesRe"].search(attrs) and not REGEXES["okMaybeItsACandidateRe"].search(attrs):
+                continue
+
+            text = node.text_content()
+            text_len = len(text)
+            if text_len < min_content_len:
+                continue
+
+            score += (text_len - min_content_len) ** 0.5
+            if score > min_score:
+                return True
+
+        return False
+
+    def summary(self, html_partial=False) -> str:
         """
         Given a HTML file, extracts the text of the article.
 
@@ -219,57 +223,29 @@ class Document:
         so it is better to call other API methods before this one.
         """
         try:
-            ruthless = True
-            while True:
-                self._html(True)
-                for i in self.tags(self.html, "script", "style"):
-                    i.drop_tree()
-                for i in self.tags(self.html, "body"):
-                    i.set("id", "readabilityBody")
-                if ruthless:
-                    self.remove_unlikely_candidates()
-                self.transform_misused_divs_into_paragraphs()
-                candidates = self.score_paragraphs()
+            self._html(True)
+            if not self.is_readable():
+                return ""
 
-                best_candidate = self.select_best_candidate(candidates)
+            for i in self.tags(self.html, "script", "style"):
+                i.drop_tree()
+            for i in self.tags(self.html, "body"):
+                i.set("id", "readabilityBody")
+            self.remove_unlikely_candidates()
+            self.transform_misused_divs_into_paragraphs()
+            candidates = self.score_paragraphs()
 
-                if best_candidate:
-                    article = self.get_article(
-                        candidates, best_candidate, html_partial=html_partial
-                    )
-                else:
-                    if ruthless:
-                        log.info("ruthless removal did not work. ")
-                        ruthless = False
-                        log.debug(
-                            (
-                                "ended up stripping too much - "
-                                "going for a safer _parse"
-                            )
-                        )
-                        # try again
-                        continue
-                    else:
-                        log.debug(
-                            (
-                                "Ruthless and lenient parsing did not work. "
-                                "Returning raw html"
-                            )
-                        )
-                        article = self.html.find("body")
-                        if article is None:
-                            article = self.html
-                cleaned_article = self.sanitize(article, candidates)
+            best_candidate = self.select_best_candidate(candidates)
 
-                article_length = len(cleaned_article or "")
-                retry_length = self.retry_length
-                of_acceptable_length = article_length >= retry_length
-                if ruthless and not of_acceptable_length:
-                    ruthless = False
-                    # Loop through and try again.
-                    continue
-                else:
-                    return cleaned_article
+            if best_candidate:
+                article = self.get_article(
+                    candidates, best_candidate, html_partial=html_partial
+                )
+            else:
+                return ""
+            cleaned_article = self.sanitize(article, candidates)
+
+            return cleaned_article or ""
         except Exception as e:
             log.exception("error getting summary: ")
             if sys.version_info[0] == 2:
@@ -515,14 +491,8 @@ class Document:
             if self.class_weight(header) < 0 or self.get_link_density(header) > 0.33:
                 header.drop_tree()
 
-        for elem in self.tags(node, "form", "textarea"):
+        for elem in self.tags(node, "form", "textarea", "iframe"):
             elem.drop_tree()
-
-        for elem in self.tags(node, "iframe"):
-            if "src" in elem.attrib and REGEXES["videoRe"].search(elem.attrib["src"]):
-                elem.text = "VIDEO"  # ADD content to iframe text node to force <iframe></iframe> proper output
-            else:
-                elem.drop_tree()
 
         allowed = {}
         # Conditionally clean <table>s, <ul>s, and <div>s
@@ -615,24 +585,6 @@ class Document:
                 elif not content_length:
                     reason = "no content"
                     to_remove = True
-                    #                if el.tag == 'div' and counts['img'] >= 1 and to_remove:
-                    #                    imgs = el.findall('.//img')
-                    #                    valid_img = False
-                    #                    log.debug(tounicode(el))
-                    #                    for img in imgs:
-                    #
-                    #                        height = img.get('height')
-                    #                        text_length = img.get('text_length')
-                    #                        log.debug ("height %s text_length %s" %(repr(height), repr(text_length)))
-                    #                        if to_int(height) >= 100 or to_int(text_length) >= 100:
-                    #                            valid_img = True
-                    #                            log.debug("valid image" + tounicode(img))
-                    #                            break
-                    #                    if valid_img:
-                    #                        to_remove = False
-                    #                        log.debug("Allowing %s" %el.text_content())
-                    #                        for desnode in self.tags(el, "table", "ul", "div"):
-                    #                            allowed[desnode] = True
 
                     # find x non empty preceding and succeeding siblings
                     i, j = 0, 0
