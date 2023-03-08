@@ -10,7 +10,7 @@ utf8_parser = lxml.html.HTMLParser(encoding="utf-8")
 
 
 def build_doc(page):
-    doc = lxml.html.document_fromstring(page, parser=utf8_parser)
+    doc = lxml.html.document_fromstring(page.encode("utf-8", "replace"), parser=utf8_parser)
     return doc, "utf-8"
 
 

@@ -183,13 +183,13 @@ class Document:
         Additional postprocessing to remove any tables, captions and SEO widgets that
         readability-lxml may have missed.
         """
-        for el in self.html.iter():
+        for el in self.html.findall(".//*"):
             if el.tag in boilerplate_tags or not boilerplate_css.isdisjoint(el.classes):
                 el.drop_tree()
 
         return tounicode(self.html, method="html")
 
-    def is_readable(self, min_score=20, min_content_len=140) -> bool:
+    def is_readable(self, min_score=20, min_content_len=50) -> bool:
         """
         Pre-parsing check to see if the document contains enough text.
         Mostly a translation of https://github.com/mozilla/readability/blob/main/Readability-readerable.js
@@ -233,7 +233,7 @@ class Document:
                 i.drop_tree()
             for i in self.tags(self.html, "body"):
                 i.set("id", "readabilityBody")
-            self.remove_unlikely_candidates()
+            # self.remove_unlikely_candidates()
             self.transform_misused_divs_into_paragraphs()
             candidates = self.score_paragraphs()
 
