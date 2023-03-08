@@ -174,9 +174,9 @@ class Document:
         """Returns document author"""
         return get_author(self._html(True))
 
-    def short_title(self):
+    def short_title(self, force_html_parse=False):
         """Returns cleaned up document title"""
-        return shorten_title(self._html(True))
+        return shorten_title(self._html(force_html_parse))
 
     def get_clean_html(self):
         """
@@ -212,7 +212,7 @@ class Document:
 
         return False
 
-    def summary(self, html_partial=False) -> str:
+    def summary(self, html_partial=False, force_html_parse=False) -> str:
         """
         Given a HTML file, extracts the text of the article.
 
@@ -227,7 +227,7 @@ class Document:
             if not self.is_readable():
                 return ""
 
-            self._html(True)
+            self._html(force_html_parse)
 
             for i in self.tags(self.html, "script", "style"):
                 i.drop_tree()
