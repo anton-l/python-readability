@@ -176,7 +176,9 @@ class Document:
 
     def short_title(self, force_html_parse=False):
         """Returns cleaned up document title"""
-        return shorten_title(self._html(force_html_parse))
+        if not isinstance(self.input, (_ElementTree, HtmlElement)):
+            self.input, self.encoding = build_doc(self.input)
+        return shorten_title(self.input)
 
     def get_clean_html(self):
         """
@@ -223,7 +225,8 @@ class Document:
         so it is better to call other API methods before this one.
         """
         try:
-            self.input, self.encoding = build_doc(self.input)
+            if not isinstance(self.input, (_ElementTree, HtmlElement)):
+                self.input, self.encoding = build_doc(self.input)
             if not self.is_readable():
                 return ""
 
