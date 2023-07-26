@@ -10,7 +10,6 @@ from lxml.html import document_fromstring
 from lxml.html import fragment_fromstring
 from lxml.html import HtmlElement
 
-from .cleaners import clean_attributes
 from .cleaners import html_cleaner
 from .htmls import build_doc
 from .htmls import get_body
@@ -100,6 +99,7 @@ class Document:
         negative_keywords=None,
         url=None,
         min_text_length=25,
+        min_text_score=20,
         retry_length=250,
         xpath=False,
         handle_failures="discard",
@@ -139,6 +139,7 @@ class Document:
         self.negative_keywords = compile_pattern(negative_keywords)
         self.url = url
         self.min_text_length = min_text_length
+        self.min_text_score = min_text_score
         self.retry_length = retry_length
         self.xpath = xpath
         self.handle_failures = handle_failures
@@ -191,7 +192,7 @@ class Document:
 
         return tounicode(self.html, method="html")
 
-    def is_readable(self, min_score=20, min_content_len=50) -> bool:
+    def is_readable(self) -> bool:
         """
         Pre-parsing check to see if the document contains enough text.
         Mostly a translation of https://github.com/mozilla/readability/blob/main/Readability-readerable.js
@@ -205,11 +206,11 @@ class Document:
 
             text = node.text_content()
             text_len = len(text)
-            if text_len < min_content_len:
+            if text_len < self.min_text_length:
                 continue
 
-            score += (text_len - min_content_len) ** 0.5
-            if score > min_score:
+            score += (text_len - self.min_text_length) ** 0.5
+            if score > self.min_text_score:
                 return True
 
         return False
